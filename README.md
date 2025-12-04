@@ -58,3 +58,95 @@ class TuneDatabase:
     def close(self) -> None:
         """Closes the database connection."""
         self.conn.close()
+
+def parse_abc_file(filepath: Path, book_id: int) -> List[Dict[str, Any]]:
+    """
+    Parses a single ABC file and returns a list of tunes.
+    
+    Args:
+        filepath: Path object pointing to the file.
+        book_id: Integer representing the book folder.
+        
+    Returns:
+        List of dictionaries, where each dict is a tune.
+    """
+    tunes = []
+    current_tune = {}
+    in_tune = False
+    
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Check if a new tune is starting (X: indicates start)
+            if line.startswith("X:"):
+                # If we were already parsing a tune, save the previous one
+                if current_tune:
+                    tunes.append(current_tune)
+                
+                # Start new tune
+                current_tune = {'book_id': book_id, 'content': line + '\n'}
+                current_tune['X'] = line.split(':')[1].strip()
+                in_tune = True
+                
+            elif in_tune:
+                # Append line to raw content
+                current_tune['content'] += line + '\n'
+                
+                # Parse Headers
+                if line.startswith("T:"):
+                    # Only take the first title if multiple exist
+                    if 'T' not in current_tune: 
+                        current_tune['T'] = line.split(':')[1].strip()
+                elif line.startswith("R:"):
+                    current_tune['R'] = line.split(':')[1].strip()
+                elif line.startswith("K:"):
+                    current_tune['K'] = line.split(':')[1].strip()
+                    
+        # Don't forget the very last tune in the file
+        if current_tune:
+            tunes.append(current_tune)
+            
+    except Exception as e:
+        print(f"Error reading {filepath}: {e}")
+        
+    return tunes
+
+
+def process_directory(base_path: str, db: TuneDatabase) -> int:
+    """
+    Recursively walks directory, parses files, and saves to DB.
+    
+    Returns:
+        Total number of tunes processed.
+    """
+    total_tunes = 0
+    path_obj = Path(base_path)
+    
+    # Walk through directory
+    for file_path in path_obj.rglob('*.abc'):
+        # Extract book number from parent folder name
+        try:
+            parent_folder = file_path.parent.name
+            book_id = int(parent_folder)
+        except ValueError:
+            print(f"Skipping {file_path}: Parent folder '{file_path.parent.name}' is not a valid number.")
+            continue
+            
+        # Parse
+        tunes_found = parse_abc_file(file_path, book_id)
+        
+        # Insert
+        for tune in tunes_found:
+            db.insert_tune(tune)
+            
+        total_tunes += len(tunes_found)
+        print(f"Processed Book {book_id}: {file_path.name} ({len(tunes_found)} tunes)")
+        
+    return total_tunes
+||Part 2||
